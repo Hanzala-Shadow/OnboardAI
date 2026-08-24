@@ -56,7 +56,14 @@ async function extractWithGemini(source: { subject: string; from: string; body: 
     if (!text) return null;
     const parsed = JSON.parse(text) as { fields?: ExtractedField[] };
     if (!Array.isArray(parsed.fields) || parsed.fields.length < 2) return null;
-    return parsed.fields.filter((field) => field.label && field.value && field.source).slice(0, 12);
+    return parsed.fields
+      .filter((field) => field.label && field.value && field.source)
+      .map((field) => ({
+        label: String(field.label).replace(/\s+/g, " ").trim().slice(0, 60),
+        value: String(field.value).replace(/\s+/g, " ").trim().slice(0, 180),
+        source: String(field.source).replace(/\s+/g, " ").trim().slice(0, 80),
+      }))
+      .slice(0, 12);
   } catch {
     return null;
   }

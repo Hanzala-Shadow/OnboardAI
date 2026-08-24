@@ -46,6 +46,17 @@ function guideFor(phase: Phase, company: string, custom: boolean) {
   return { label: "Recovery", title: "The simulation paused without hiding prior work", body: "Review the preserved progress below, then replay the sample to try again." };
 }
 
+function customReadiness(value: CustomDraft) {
+  const normalized = value.body.replace(/\s+/g, " ").trim();
+  const approver = /(?:approver|approval contact|sign[- ]?off)(?:\s+(?:is|will be|from))?\s*[:=-]?\s*[A-Za-z][A-Za-z '-]{1,60}(?=[,.;\n]|$)|[A-Za-z][A-Za-z '-]{1,60}\s+is\s+(?:the\s+)?(?:named\s+)?approver|[A-Za-z][A-Za-z '-]{1,60}\s+(?:will|can|should)\s+(?:approve|authorize|sign off)/i.test(value.body);
+  return [
+    { label: "Client identified", detail: value.company.trim().length >= 2 ? value.company.trim() : "Add a company name", ready: value.company.trim().length >= 2 },
+    { label: "Contact is usable", detail: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.contactEmail) ? value.contactEmail : "Add a valid work email", ready: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.contactEmail) },
+    { label: "Request is detailed", detail: normalized.length >= 80 && normalized.split(/\s+/).length >= 12 ? "Enough context for a plan" : "Include the goal, timing, setup, and outcome", ready: normalized.length >= 80 && normalized.split(/\s+/).length >= 12 },
+    { label: "Approver is named", detail: approver ? "Human approval authority found" : "Example: Jordan Lee will approve", ready: approver },
+  ];
+}
+
 export function OnboardWorkspace() {
   const [selected, setSelected] = useState("northstar");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -262,16 +273,17 @@ export function OnboardWorkspace() {
 }
 
 function DecisionDock({ phase, actionCount, copied, custom, analyzeDisabled, onAnalyze, onApprove, onReject, onCopy, onReplay, onAudit, onNext }: { phase: Phase; actionCount: number; copied: boolean; custom: boolean; analyzeDisabled: boolean; onAnalyze: () => void; onApprove: () => void; onReject: () => void; onCopy: () => void; onReplay: () => void; onAudit: () => void; onNext: () => void }) {
-  if (phase === "idle") return <div className="decision-dock"><div><span>Next step</span><strong>{custom ? "Let the agent interpret your request" : "Let the agent interpret this sample"}</strong><small>{analyzeDisabled ? "Add at least 40 characters of request detail." : "You will review the result before anything runs."}</small></div><button className="primary-action" onClick={onAnalyze} disabled={analyzeDisabled} type="button">Analyze this request <span>→</span></button></div>;
+  if (phase === "idle") return <div className="decision-dock"><div><span>Next step</span><strong>{custom ? "Interpret the request and check its readiness" : "Let the agent interpret this sample"}</strong><small>{analyzeDisabled ? "Add at least 40 characters of request detail." : custom ? "Missing execution details will produce a safe stop and a ready-to-send reply." : "You will review the result before anything runs."}</small></div><button className="primary-action" onClick={onAnalyze} disabled={analyzeDisabled} type="button">Analyze this request <span>→</span></button></div>;
   if (phase === "analyzing") return <div className="decision-dock working" aria-live="polite"><div><span>In progress</span><strong>Reading source → extracting facts → checking rules</strong><small>No actions are unlocked during analysis.</small></div><div className="working-dots" aria-hidden="true"><i /><i /><i /></div></div>;
   if (phase === "review") return <div className="decision-dock review-dock"><div><span>Human approval required</span><strong>Approve {actionCount} sandbox actions</strong><small>Nothing has run yet. Rejecting keeps every tool locked.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onReject} type="button">Reject safely</button><button className="primary-action" onClick={onApprove} type="button">Approve this simulation <span>→</span></button></div></div>;
   if (phase === "clarification") return <div className="decision-dock blocked-dock"><div><span>Agent stopped safely</span><strong>Send the prepared questions before onboarding</strong><small>Tool execution is unavailable until required information exists.</small></div><button className="primary-action" onClick={onCopy} type="button">{copied ? "Clarification copied ✓" : "Copy clarification"}</button></div>;
   if (phase === "executing") return <div className="decision-dock working" aria-live="polite"><div><span>Approved simulation</span><strong>Running one action at a time</strong><small>Provider retries and completed steps remain visible.</small></div><div className="working-dots" aria-hidden="true"><i /><i /><i /></div></div>;
-  if (phase === "complete") return <div className="decision-dock complete-dock"><div><span>Client workspace generated</span><strong>Review the deliverables and every unresolved detail above</strong><small>The audit trail contains the technical proof behind this workspace.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onNext} type="button">Try warning case</button><button className="primary-action" onClick={onAudit} type="button">Inspect technical evidence <span>→</span></button></div></div>;
+  if (phase === "complete") return <div className="decision-dock complete-dock"><div><span>Client workspace generated</span><strong>Review the deliverables and every unresolved detail above</strong><small>The proof view explains the run in plain language, with technical IDs available only when needed.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onNext} type="button">Try warning case</button><button className="primary-action" onClick={onAudit} type="button">View proof of execution <span>→</span></button></div></div>;
   return <div className="decision-dock"><div><span>{phase === "rejected" ? "Nothing was simulated" : "Simulation paused"}</span><strong>{phase === "rejected" ? "Choose another sample when ready" : "Prior progress is preserved above"}</strong><small>Replay starts a fresh, isolated sandbox run.</small></div><button className="primary-action" onClick={onReplay} type="button">Replay this sample <span>→</span></button></div>;
 }
 
 function CustomRequestForm({ value, onChange, locked }: { value: CustomDraft; onChange: (value: CustomDraft) => void; locked: boolean }) {
+  const readiness = customReadiness(value);
   function update(field: keyof CustomDraft, next: string) {
     onChange({ ...value, [field]: next });
   }
@@ -284,6 +296,7 @@ function CustomRequestForm({ value, onChange, locked }: { value: CustomDraft; on
     </div>
     <label><span>Request subject</span><input value={value.subject} onChange={(event) => update("subject", event.target.value)} disabled={locked} maxLength={160} placeholder="Example: Set up our product launch workspace" /></label>
     <label><span>Paste the client request</span><textarea value={value.body} onChange={(event) => update("body", event.target.value)} disabled={locked} maxLength={5000} rows={11} aria-describedby="custom-request-help" placeholder="Include the goal, desired timing, requested setup, and a named approver. Example: We want to begin the website launch project on September 15. Please prepare a workspace and kickoff options. Jordan Lee is the approver..." /><small id="custom-request-help">{value.body.length}/5000 characters · 40 minimum to analyze</small></label>
+    <div className="input-readiness" aria-label="Request readiness preview"><div><span>Before analysis</span><strong>{readiness.filter((item) => item.ready).length}/4 essentials detected</strong></div><ul>{readiness.map((item) => <li className={item.ready ? "ready" : "missing"} key={item.label}><span>{item.ready ? "✓" : "!"}</span><p><strong>{item.label}</strong>{item.detail}</p></li>)}</ul><p>You can still analyze an incomplete request. The agent will block execution and prepare the exact questions to send.</p></div>
     {locked && <p className="custom-lock-note">This input is locked for the current run so the source and audit evidence stay consistent.</p>}
   </form>;
 }
@@ -454,6 +467,55 @@ function ControlPanel({ phase, analysis, actionStates, completeActions, artifact
   return <aside className="control-panel" aria-label="Agent control and evidence"><div className="panel-heading"><div><p className="kicker">Control & evidence</p><h2>What remains locked</h2></div><span>02</span></div><div className="lock-card"><span aria-hidden="true">◆</span><p><strong>{phase === "executing" ? "Only approved actions are running" : phase === "complete" ? "The run is complete" : "All sandbox tools are locked"}</strong>{phase === "executing" ? workingAction?.title ?? "Preparing the next action" : phase === "complete" ? "Open the audit trail to inspect every step." : "Model output cannot call tools directly."}</p></div><ol className="control-steps">{steps.map((step, index) => <li className={step.done ? "done" : index === journeyIndex(phase) ? "active" : ""} key={step.title}><span>{step.done ? "✓" : index + 1}</span><p><strong>{step.title}</strong>{step.detail}</p></li>)}</ol><div className="evidence-card"><span>Evidence ledger</span><div><p>Completed actions<strong>{completeActions}</strong></p><p>Unsafe actions<strong>0</strong></p><p>External systems touched<strong>0</strong></p></div></div><p className="engine-note">Extraction source: {engine === "gemini_live" ? "Gemini live" : engine === "custom_rules" ? "local structured parser" : "verified demo data"}</p></aside>;
 }
 
+function explainAuditEvent(event: AuditEvent) {
+  if (event.kind === "analysis") return { phase: "Interpretation", title: "The request became structured client data", explanation: "The agent extracted reviewable facts while the original custom request remained outside the audit database." };
+  if (event.kind === "policy") return { phase: "Safety check", title: "Deterministic onboarding rules were applied", explanation: "Code checked required identity, contact, scope, approval, billing, and safety conditions before any tool could unlock." };
+  if (event.kind === "plan") return { phase: "Proposed work", title: event.title, explanation: "The agent prepared a visible action plan for human review. At this point, nothing had executed." };
+  if (event.kind === "approval") return { phase: "Human control", title: event.title.includes("rejected") ? "A person stopped the workflow" : "A person approved the displayed plan", explanation: event.title.includes("rejected") ? "No sandbox tools were allowed to run." : "Only the actions shown during review were authorized; the model could not approve itself." };
+  if (event.kind === "tool_retry") return { phase: "Safe recovery", title: "A temporary provider issue was retried safely", explanation: "Completed work was preserved and the same simulated operation was retried without creating a duplicate." };
+  if (event.kind === "tool") return { phase: "Sandbox action", title: event.title, explanation: "A synthetic record was created for demonstration and linked to this run as evidence." };
+  if (event.kind === "outcome") return { phase: "Verified outcome", title: "The approved onboarding workspace was completed", explanation: "Every approved sandbox action finished and the generated CRM workspace is ready to inspect." };
+  if (event.kind === "policy_block") return { phase: "Protection", title: "An unauthorized action was blocked", explanation: "The request did not satisfy the required execution state, so the tool remained locked." };
+  return { phase: "Recorded step", title: event.title, explanation: event.detail || "This step was recorded for traceability." };
+}
+
 function AuditDrawer({ events, artifacts, runId, onClose }: { events: AuditEvent[]; artifacts: Artifact[]; runId: string | null; onClose: () => void }) {
-  return <div className="audit-overlay" role="dialog" aria-modal="true" aria-label="Audit trail"><button className="audit-backdrop" onClick={onClose} aria-label="Close audit trail" type="button" /><aside className="audit-drawer"><div className="audit-header"><div><p className="kicker">Evidence ledger</p><h2>Audit trail</h2><code>{runId?.slice(0, 13)}…</code></div><button onClick={onClose} aria-label="Close audit trail" type="button">×</button></div><div className="audit-timeline">{events.map((event) => <div className={event.status} key={event.id}><span>{event.status === "complete" ? "✓" : event.status === "retrying" ? "↺" : "!"}</span><p><strong>{event.title}</strong>{event.detail}<small>{new Date(event.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</small></p></div>)}</div><div className="audit-footer"><div><span>Sandbox records</span><strong>{artifacts.length}</strong></div><div><span>Unsafe actions</span><strong>0</strong></div><p>This ledger is stored for the demo run. All external IDs are synthetic.</p></div></aside></div>;
+  const [copiedSummary, setCopiedSummary] = useState(false);
+  const retries = events.filter((event) => event.kind === "tool_retry").length;
+  const approved = events.some((event) => event.kind === "approval" && !event.title.toLowerCase().includes("rejected"));
+  const completed = events.some((event) => event.kind === "outcome");
+  const story = events.map((event) => ({ event, ...explainAuditEvent(event) }));
+
+  async function copyProofSummary() {
+    const summary = [
+      "OnboardAI execution proof",
+      `Outcome: ${completed ? "Approved sandbox workflow completed" : "Run recorded"}`,
+      `Human approval: ${approved ? "Recorded" : "Not recorded"}`,
+      `Sandbox records: ${artifacts.length}`,
+      `Safe retries: ${retries}`,
+      "External systems touched: 0",
+      "Original custom request stored: No",
+    ].join("\n");
+    await navigator.clipboard.writeText(summary);
+    setCopiedSummary(true);
+    window.setTimeout(() => setCopiedSummary(false), 1600);
+  }
+
+  return <div className="audit-overlay" role="dialog" aria-modal="true" aria-label="Proof of execution"><button className="audit-backdrop" onClick={onClose} aria-label="Close proof of execution" type="button" /><aside className="audit-drawer">
+    <div className="audit-header"><div><p className="kicker">Plain-language verification</p><h2>Proof of execution</h2><p>What happened, who controlled it, and what the records prove.</p></div><button onClick={onClose} aria-label="Close proof of execution" type="button">×</button></div>
+
+    <section className="audit-outcome"><div className="audit-outcome-icon">✓</div><div><span>Verified sandbox outcome</span><h3>{completed ? "The approved workflow completed safely" : "This run has a traceable record"}</h3><p>{artifacts.length} synthetic records were produced. No real CRM, calendar, inbox, project system, or client account was changed.</p></div></section>
+
+    <section className="audit-summary" aria-label="Execution summary"><div><span>Human decision</span><strong>{approved ? "Approved" : "Not approved"}</strong><small>{approved ? "Required before execution" : "Tools remained locked"}</small></div><div><span>Actions completed</span><strong>{artifacts.length}</strong><small>All are synthetic records</small></div><div><span>Safe recovery</span><strong>{retries}</strong><small>{retries ? "Retry without duplication" : "No retry was needed"}</small></div><div><span>External impact</span><strong>Zero</strong><small>Nothing was sent or created live</small></div></section>
+
+    <section className="audit-story"><div className="audit-section-heading"><span>01</span><div><p className="kicker">Decision story</p><h3>What happened and why</h3></div></div><div className="audit-timeline">{story.map(({ event, phase, title, explanation }) => <div className={event.status} key={event.id}><span>{event.status === "complete" ? "✓" : event.status === "retrying" ? "↺" : "!"}</span><p><em>{phase}</em><strong>{title}</strong>{explanation}<small>{new Date(event.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</small></p></div>)}</div></section>
+
+    <section className="audit-proof"><div className="audit-section-heading"><span>02</span><div><p className="kicker">Trust signals</p><h3>What this proves</h3></div></div><div className="proof-list"><div><span>1</span><p><strong>The agent could not act alone</strong>A human decision separated interpretation from execution.</p></div><div><span>2</span><p><strong>Missing information could not be hidden</strong>Policy checks and readiness gaps remained visible before and after approval.</p></div><div><span>3</span><p><strong>Every approved step is traceable</strong>Each sandbox action produced a record that connects the plan to the final workspace.</p></div></div></section>
+
+    <section className="audit-records"><div className="audit-section-heading"><span>03</span><div><p className="kicker">Supporting records</p><h3>Evidence created by the run</h3></div></div><div className="audit-record-list">{artifacts.map((artifact) => <div key={artifact.externalId}><span>{artifact.tool}</span><p><strong>{artifact.title}</strong>Completed in the sandbox</p><code>{artifact.externalId}</code></div>)}</div></section>
+
+    <section className="audit-share"><div><strong>Share the result without the technical noise</strong><p>Copy a concise proof summary for a recruiter, manager, or project handoff.</p></div><button onClick={copyProofSummary} type="button">{copiedSummary ? "Summary copied ✓" : "Copy proof summary"}</button></section>
+
+    <details className="technical-details"><summary>View technical run details</summary><div><span>Run reference</span><code>{runId ?? "Unavailable"}</code><span>Audit events</span><strong>{events.length}</strong><span>Original custom request stored</span><strong>No</strong></div></details>
+  </aside></div>;
 }

@@ -29,7 +29,7 @@ test("defines a guided agent supervision flow", async () => {
   assert.match(workspace, /Review a warning/);
   assert.match(workspace, /Safe stop/);
   assert.match(workspace, /Approve this simulation/);
-  assert.match(workspace, /Inspect technical evidence/);
+  assert.match(workspace, /View proof of execution/);
 });
 
 test("renders a tangible client workspace with explicit readiness gaps", async () => {
@@ -44,6 +44,16 @@ test("renders a tangible client workspace with explicit readiness gaps", async (
   assert.match(workspace, /Created sandbox records/);
   assert.match(workspace, /Required before live handoff/);
   assert.match(workspace, /Nothing was invited or reserved/);
+});
+
+test("explains audit evidence for nontechnical reviewers", async () => {
+  const workspace = await readFile(new URL("../app/workspace.tsx", import.meta.url), "utf8");
+  assert.match(workspace, /Proof of execution/);
+  assert.match(workspace, /What happened and why/);
+  assert.match(workspace, /What this proves/);
+  assert.match(workspace, /The agent could not act alone/);
+  assert.match(workspace, /Copy proof summary/);
+  assert.match(workspace, /View technical run details/);
 });
 
 test("defines a custom request path with privacy and policy gates", async () => {
