@@ -29,7 +29,21 @@ test("defines a guided agent supervision flow", async () => {
   assert.match(workspace, /Review a warning/);
   assert.match(workspace, /Safe stop/);
   assert.match(workspace, /Approve this simulation/);
-  assert.match(workspace, /Open audit trail/);
+  assert.match(workspace, /Inspect technical evidence/);
+});
+
+test("renders a tangible client workspace with explicit readiness gaps", async () => {
+  const workspace = await readFile(new URL("../app/workspace.tsx", import.meta.url), "utf8");
+  assert.match(workspace, /Generated client workspace/);
+  assert.match(workspace, /Client profile/);
+  assert.match(workspace, /Missing and incomplete information/);
+  assert.match(workspace, /Onboarding task board/);
+  assert.match(workspace, /Kickoff options/);
+  assert.match(workspace, /Welcome email/);
+  assert.match(workspace, /Decision and policy history/);
+  assert.match(workspace, /Created sandbox records/);
+  assert.match(workspace, /Required before live handoff/);
+  assert.match(workspace, /Nothing was invited or reserved/);
 });
 
 test("defines a custom request path with privacy and policy gates", async () => {

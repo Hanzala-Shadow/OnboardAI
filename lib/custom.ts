@@ -59,11 +59,12 @@ function titleCase(value: string) {
 
 export function buildCustomAnalysis(request: CustomRequest, liveFields?: ExtractedField[] | null) {
   const text = `${request.subject}\n${request.body}`;
-  const approver = firstMatch(text, /(?:approver|approved by|approval from|sign[- ]?off from)\s*(?:is|:|-)?\s*([A-Za-z][A-Za-z .'-]{2,60})/i);
+  const approver = firstMatch(text, /(?:approver|approved by|approval from|sign[- ]?off from)\s*(?:is|:|-)?\s*([A-Za-z][A-Za-z '-]{2,60}?)(?=[,.;\n]|$)/i);
   const billingEmail = firstMatch(text, /(?:billing|finance|accounts payable)(?:\s+contact)?(?:\s+is|\s*:)?\s*([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/i);
   const budget = firstMatch(text, /((?:USD|EUR|GBP|PKR|\$|€|£)\s?[\d,.]+(?:\s?(?:k|K|thousand))?)/);
   const start = firstMatch(text, /(?:start|kickoff|begin|launch)(?:\s+on|\s+by|\s*:|\s+date is)?\s+([^,.\n]{3,36})/i);
-  const seats = firstMatch(text, /(?:invite|add|create accounts? for|team of)\s+(\d{1,3})/i);
+  const seatMatch = text.match(/(?:invite|add|create accounts? for|team of)\s+(\d{1,3})|(\d{1,3})\s+(?:team members?|users?|seats?)/i);
+  const seats = seatMatch?.[1] || seatMatch?.[2];
   const requestType = firstMatch(text, /(?:project|workspace|campaign|redesign|sprint|implementation|onboarding)\s*(?:is|:|-)?\s*([^,.\n]{3,70})/i);
 
   const fields: ExtractedField[] = liveFields?.length ? liveFields : [

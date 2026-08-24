@@ -25,7 +25,7 @@ const demoMeta = {
   fieldnote: { label: "Safe stop", detail: "See missing information block every tool.", recommended: false },
 } as const;
 
-const journey = ["Choose a sample", "Review interpretation", "Approve or stop", "Watch execution", "Inspect evidence"];
+const journey = ["Choose a sample", "Review interpretation", "Approve or stop", "Watch execution", "Inspect workspace"];
 
 function journeyIndex(phase: Phase) {
   if (phase === "idle") return 0;
@@ -41,7 +41,7 @@ function guideFor(phase: Phase, company: string, custom: boolean) {
   if (phase === "review") return { label: "Your decision", title: "Review what the simulation is allowed to do", body: "Check the extracted facts, warnings, and proposed actions. Approve only when the plan matches the request." };
   if (phase === "clarification") return { label: "Safe stop", title: "The agent found required information missing", body: "No tools are available. Copy the prepared clarification to see how the workflow recovers safely." };
   if (phase === "executing") return { label: "Approved simulation", title: "Watching each approved action run", body: "Only the actions you approved are being simulated. Progress and retries remain visible." };
-  if (phase === "complete") return { label: "Evidence ready", title: "Inspect the proof of what happened", body: "Open the audit trail, then try the warning or safe-stop sample to test a different behavior." };
+  if (phase === "complete") return { label: "Workspace ready", title: "Review the client workspace the agent produced", body: "Inspect the CRM profile, readiness gaps, task plan, kickoff draft, welcome email, and supporting evidence." };
   if (phase === "rejected") return { label: "Stopped safely", title: "Your rejection prevented every action", body: "Nothing was simulated. Choose another sample or replay this one." };
   return { label: "Recovery", title: "The simulation paused without hiding prior work", body: "Review the preserved progress below, then replay the sample to try again." };
 }
@@ -230,7 +230,7 @@ export function OnboardWorkspace() {
             <strong>{String(currentStep + 1).padStart(2, "0")} / 05</strong>
           </div>
 
-          <div className="stage-grid">
+          <div className={`stage-grid ${phase === "complete" ? "complete-view" : ""}`}>
             <section className="request-panel">
               <div className="request-toolbar">
                 <div><p className="kicker">{activeTab === "source" ? isCustom ? "Your client request" : "Sample client request" : "Review proposed plan"}</p><h2>{active.subject}</h2></div>
@@ -238,13 +238,13 @@ export function OnboardWorkspace() {
               </div>
 
               <div id={activeTab === "source" ? "source-panel" : "review-panel"} role="tabpanel" aria-labelledby={activeTab === "source" ? "source-tab" : "review-tab"}>
-                {activeTab === "source" ? isCustom ? <CustomRequestForm value={customDraft} onChange={setCustomDraft} locked={phase !== "idle"} /> : <SourceRequest scenario={active} /> : <AgentWorkspace phase={phase} analysis={analysis} actionStates={actionStates} artifacts={artifacts} error={error} engine={engine} onCopy={copyClarification} copied={copied} />}
+                {activeTab === "source" ? isCustom ? <CustomRequestForm value={customDraft} onChange={setCustomDraft} locked={phase !== "idle"} /> : <SourceRequest scenario={active} /> : <AgentWorkspace scenario={active} phase={phase} analysis={analysis} actionStates={actionStates} artifacts={artifacts} error={error} engine={engine} onCopy={copyClarification} copied={copied} />}
               </div>
 
               <DecisionDock phase={phase} actionCount={analysis?.actions.length ?? 0} copied={copied} custom={isCustom} analyzeDisabled={isCustom && !customCanAnalyze} onAnalyze={runOnboarding} onApprove={approvePlan} onReject={rejectPlan} onCopy={copyClarification} onReplay={() => reset()} onAudit={() => setShowAudit(true)} onNext={() => reset(phase === "complete" ? "copper" : "northstar")} />
             </section>
 
-            <ControlPanel phase={phase} analysis={analysis} actionStates={actionStates} completeActions={completeActions} artifacts={artifacts} engine={engine} />
+            {phase !== "complete" && <ControlPanel phase={phase} analysis={analysis} actionStates={actionStates} completeActions={completeActions} artifacts={artifacts} engine={engine} />}
           </div>
         </section>
       </section>
@@ -267,7 +267,7 @@ function DecisionDock({ phase, actionCount, copied, custom, analyzeDisabled, onA
   if (phase === "review") return <div className="decision-dock review-dock"><div><span>Human approval required</span><strong>Approve {actionCount} sandbox actions</strong><small>Nothing has run yet. Rejecting keeps every tool locked.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onReject} type="button">Reject safely</button><button className="primary-action" onClick={onApprove} type="button">Approve this simulation <span>→</span></button></div></div>;
   if (phase === "clarification") return <div className="decision-dock blocked-dock"><div><span>Agent stopped safely</span><strong>Send the prepared questions before onboarding</strong><small>Tool execution is unavailable until required information exists.</small></div><button className="primary-action" onClick={onCopy} type="button">{copied ? "Clarification copied ✓" : "Copy clarification"}</button></div>;
   if (phase === "executing") return <div className="decision-dock working" aria-live="polite"><div><span>Approved simulation</span><strong>Running one action at a time</strong><small>Provider retries and completed steps remain visible.</small></div><div className="working-dots" aria-hidden="true"><i /><i /><i /></div></div>;
-  if (phase === "complete") return <div className="decision-dock complete-dock"><div><span>Run complete</span><strong>Evidence is ready for inspection</strong><small>Next, try a warning case to see human judgment and retry behavior.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onNext} type="button">Try warning case</button><button className="primary-action" onClick={onAudit} type="button">Open audit trail <span>→</span></button></div></div>;
+  if (phase === "complete") return <div className="decision-dock complete-dock"><div><span>Client workspace generated</span><strong>Review the deliverables and every unresolved detail above</strong><small>The audit trail contains the technical proof behind this workspace.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onNext} type="button">Try warning case</button><button className="primary-action" onClick={onAudit} type="button">Inspect technical evidence <span>→</span></button></div></div>;
   return <div className="decision-dock"><div><span>{phase === "rejected" ? "Nothing was simulated" : "Simulation paused"}</span><strong>{phase === "rejected" ? "Choose another sample when ready" : "Prior progress is preserved above"}</strong><small>Replay starts a fresh, isolated sandbox run.</small></div><button className="primary-action" onClick={onReplay} type="button">Replay this sample <span>→</span></button></div>;
 }
 
@@ -292,15 +292,150 @@ function SourceRequest({ scenario }: { scenario: (typeof scenarios)[number] }) {
   return <article className="message-card"><div className="message-meta"><span className="avatar large" aria-hidden="true">{scenario.contact.charAt(0)}</span><div><strong>{scenario.contact}</strong><span>{scenario.email}</span></div><time>Today, 09:42</time></div><div className="message-body">{scenario.body.map((paragraph, index) => <p key={index}>{paragraph.split("\n").map((line, lineIndex) => <span key={lineIndex}>{line}{lineIndex < paragraph.split("\n").length - 1 && <br />}</span>)}</p>)}</div><div className="attachments">{scenario.attachments.map((file) => <div className="attachment" key={file.name}><span>{file.kind}</span><p><strong>{file.name}</strong><small>{file.size}</small></p><b>✓</b></div>)}</div></article>;
 }
 
-function AgentWorkspace({ phase, analysis, actionStates, artifacts, error, engine, onCopy, copied }: { phase: Phase; analysis: Analysis | null; actionStates: Record<string, ActionState>; artifacts: Artifact[]; error: string; engine: string; onCopy: () => void; copied: boolean }) {
+function AgentWorkspace({ scenario, phase, analysis, actionStates, artifacts, error, engine, onCopy, copied }: { scenario: Scenario; phase: Phase; analysis: Analysis | null; actionStates: Record<string, ActionState>; artifacts: Artifact[]; error: string; engine: string; onCopy: () => void; copied: boolean }) {
   if (phase === "analyzing") return <div className="analysis-loading"><div className="analysis-symbol" aria-hidden="true"><span>01</span><i /></div><p className="kicker">Building a reviewable plan</p><h3>The agent is interpreting the request</h3><ul><li className="done">Reading the email and attachments</li><li className="active">Extracting client and project facts</li><li>Applying onboarding policy</li></ul></div>;
   if (!analysis && phase === "error") return <div className="outcome-state error-state"><span>!</span><p className="kicker">Analysis paused</p><h3>The request could not be interpreted</h3><p>{error}</p><small>No sandbox actions were unlocked.</small></div>;
   if (phase === "rejected") return <div className="outcome-state rejected-state"><span>×</span><p className="kicker">Human decision recorded</p><h3>The plan was rejected safely</h3><p>No client record, task, invitation, calendar hold, or email was simulated.</p></div>;
   if (!analysis) return null;
   if (phase === "clarification") return <div className="review-stack"><div className="review-head blocked"><div><p className="kicker">Execution unavailable</p><h3>{analysis.missing.length} required details are missing</h3></div><span>SAFE STOP</span></div><div className="missing-grid">{analysis.missing.map((item) => <div key={item}><span>!</span><p><strong>{item}</strong>Required before any onboarding action</p></div>)}</div><div className="draft-card"><div><p className="kicker">Prepared recovery</p><button onClick={onCopy} type="button">{copied ? "Copied ✓" : "Copy"}</button></div><pre>{analysis.clarificationDraft}</pre></div><PolicyGrid policies={analysis.policies} /></div>;
-  if (phase === "complete") return <div className="outcome-state success-state"><span>✓</span><p className="kicker">Approved simulation complete</p><h3>Every action produced evidence</h3><p>The sandbox created traceable records without touching a real client system.</p><div className="artifact-grid">{artifacts.map((artifact) => <div key={artifact.externalId}><span>{artifact.tool}</span><strong>{artifact.title}</strong><code>{artifact.externalId}</code></div>)}</div></div>;
+  if (phase === "complete") return <GeneratedClientWorkspace scenario={scenario} analysis={analysis} artifacts={artifacts} />;
 
   return <div className="review-stack">{phase === "error" && <div className="inline-error"><strong>Simulation paused</strong><span>{error}</span><small>Completed evidence and the original plan remain visible.</small></div>}<div className="review-head"><div><p className="kicker">AI interpretation for review</p><h3>{analysis.fields.length} extracted facts</h3></div><span>{analysis.confidence}% confidence</span></div><div className="field-grid">{analysis.fields.map((field) => <div key={field.label}><span>{field.label}</span><strong>{field.value}</strong><small>Source: {field.source}</small></div>)}</div><PolicyGrid policies={analysis.policies} /><div className="action-plan"><div className="section-label"><span>Actions awaiting approval</span><strong>{analysis.actions.length}</strong></div>{analysis.actions.map((action) => { const state = actionStates[action.id] ?? "queued"; return <div className={`action-row ${state}`} key={action.id}><span className="action-state">{state === "complete" ? "✓" : state === "running" ? "↻" : state === "retrying" ? "↺" : state === "failed" ? "!" : "→"}</span><div><strong>{action.title}</strong><small>{action.detail}</small></div><em>{state === "queued" ? "Locked" : state === "retrying" ? "Safe retry" : state}</em></div>; })}</div><p className="model-note">{engine === "gemini_live" ? "AI extraction: Gemini · Policy and execution: deterministic code" : engine === "custom_rules" ? "Custom extraction: local structured parser · Policy and execution: deterministic code" : "AI extraction: verified demo dataset · Policy and execution: deterministic code"}</p></div>;
+}
+
+type WorkspaceField = {
+  label: string;
+  value: string;
+  source: string;
+  status: "confirmed" | "needs-input" | "unassigned";
+  note: string;
+};
+
+type WorkspaceGap = {
+  label: string;
+  detail: string;
+  action: string;
+  owner: string;
+  impact: string;
+  severity: "required" | "recommended";
+};
+
+function matchedField(analysis: Analysis, labels: string[]) {
+  const targets = labels.map((label) => label.toLowerCase());
+  return analysis.fields.find((field) => targets.includes(field.label.toLowerCase()));
+}
+
+function GeneratedClientWorkspace({ scenario, analysis, artifacts }: { scenario: Scenario; analysis: Analysis; artifacts: Artifact[] }) {
+  const company = matchedField(analysis, ["Company", "Client"])?.value || scenario.company;
+  const contact = matchedField(analysis, ["Primary contact", "Contact"])?.value || scenario.contact;
+  const project = matchedField(analysis, ["Project", "Request", "Scope signal"])?.value || scenario.subject;
+  const kickoff = matchedField(analysis, ["Kickoff", "Timing signal", "Requested start"])?.value;
+  const delivery = matchedField(analysis, ["Delivery window", "New deadline", "Deadline"])?.value;
+  const approver = matchedField(analysis, ["Approver"])?.value;
+  const seats = matchedField(analysis, ["Team seats"])?.value;
+  const budget = matchedField(analysis, ["Budget", "Budget signal"])?.value;
+  const billingPolicy = analysis.policies.find((policy) => policy.label === "Billing readiness");
+  const billing = billingPolicy?.status === "pass" ? billingPolicy.detail.split(": ")[1] : undefined;
+  const timezone = matchedField(analysis, ["Client timezone", "Timezone"])?.value;
+  const owner = matchedField(analysis, ["Project owner", "Internal owner"])?.value;
+
+  const profile: WorkspaceField[] = [
+    { label: "Client", value: company, source: "Approved interpretation", status: "confirmed", note: "CRM account identity" },
+    { label: "Primary contact", value: contact, source: "Approved interpretation", status: "confirmed", note: "Main onboarding contact" },
+    { label: "Project scope", value: project, source: "Approved interpretation", status: "confirmed", note: "Workspace and task-plan basis" },
+    { label: "Named approver", value: approver || "Not supplied", source: approver ? "Approved interpretation" : "No source evidence", status: approver ? "confirmed" : "needs-input", note: approver ? "Can approve consequential changes" : "Required before a live handoff" },
+    { label: "Kickoff date", value: kickoff || "Not supplied", source: kickoff ? "Approved interpretation" : "No source evidence", status: kickoff ? "confirmed" : "needs-input", note: kickoff ? "Used for the draft schedule" : "Calendar invitation remains unsent" },
+    { label: "Delivery target", value: delivery || "Not supplied", source: delivery ? "Approved interpretation" : "No source evidence", status: delivery ? "confirmed" : "needs-input", note: delivery ? "Used for milestone planning" : "Task due dates remain relative" },
+    { label: "Team capacity", value: seats ? `${seats} seat${seats === "1" ? "" : "s"}` : "Not supplied", source: seats ? "Approved interpretation" : "No source evidence", status: seats ? "confirmed" : "needs-input", note: seats ? "Provisioning quantity confirmed" : "Individual invites cannot be prepared" },
+    { label: "Budget", value: budget || "Not supplied", source: budget ? "Approved interpretation" : "No source evidence", status: budget ? "confirmed" : "needs-input", note: budget ? "Visible for delivery review" : "Commercial alignment is unverified" },
+    { label: "Billing contact", value: billing || "Not supplied", source: billing ? "Policy evidence" : "No source evidence", status: billing ? "confirmed" : "needs-input", note: billing ? "Ready for billing setup" : "Required before real billing activation" },
+    { label: "Client timezone", value: timezone || "Not supplied", source: timezone ? "Approved interpretation" : "No source evidence", status: timezone ? "confirmed" : "needs-input", note: timezone ? "Scheduling basis confirmed" : "Kickoff times must be confirmed" },
+    { label: "Internal owner", value: owner || "Unassigned", source: owner ? "Approved interpretation" : "Operations queue", status: owner ? "confirmed" : "unassigned", note: owner ? "Accountable delivery owner" : "Assign before project activation" },
+  ];
+
+  const gapTemplates: Record<string, Omit<WorkspaceGap, "label">> = {
+    "Named approver": { detail: "No authorized person was identified in the request.", action: "Ask the client to provide the approver's full name and authority.", owner: "Client contact", impact: "Live approvals remain locked.", severity: "required" },
+    "Kickoff date": { detail: "The request did not provide a confirmed kickoff date.", action: "Confirm the preferred date before sending calendar invitations.", owner: "Client contact", impact: "Schedule options remain drafts.", severity: "recommended" },
+    "Delivery target": { detail: "No fixed delivery date or delivery window was found.", action: "Agree a deadline, then convert relative task dates into calendar dates.", owner: "Project owner", impact: "The task board uses Day 0/Day 1 placeholders.", severity: "recommended" },
+    "Team capacity": { detail: "The number of users or a complete roster was not supplied.", action: "Collect names, work emails, roles, and required access levels.", owner: "Client contact", impact: "Workspace invitations cannot be prepared.", severity: "required" },
+    "Budget": { detail: "No budget or commercial limit was found in the source.", action: "Confirm the approved budget or attach the signed commercial scope.", owner: "Account owner", impact: "Commercial alignment is not verified.", severity: "recommended" },
+    "Billing contact": { detail: "A billing or accounts-payable contact was not detected.", action: "Collect the billing name, email, legal entity, and invoice address.", owner: "Client contact", impact: "A real billing profile cannot be activated.", severity: "required" },
+    "Client timezone": { detail: "The client's scheduling timezone was not specified.", action: "Confirm the timezone before choosing or sending a kickoff slot.", owner: "Client contact", impact: "Displayed time options are not send-ready.", severity: "required" },
+    "Internal owner": { detail: "The workflow prepared the project but did not invent an internal owner.", action: "Assign a delivery owner with capacity for this engagement.", owner: "Operations lead", impact: "Accountability and task assignment remain incomplete.", severity: "required" },
+  };
+
+  const gaps: WorkspaceGap[] = profile
+    .filter((field) => field.status !== "confirmed")
+    .map((field) => ({ label: field.label, ...gapTemplates[field.label] }))
+    .filter((gap): gap is WorkspaceGap => Boolean(gap.detail));
+  for (const policy of analysis.policies.filter((item) => item.status !== "pass")) {
+    if (gaps.some((gap) => gap.label.toLowerCase().includes(policy.label.toLowerCase().split(" ")[0]))) continue;
+    gaps.push({ label: policy.label, detail: policy.detail, action: "Review this policy result and resolve it before a real handoff.", owner: "Human reviewer", impact: policy.status === "blocked" ? "Production execution would remain blocked." : "Human judgment is required.", severity: policy.status === "blocked" ? "required" : "recommended" });
+  }
+
+  const hasWorkspace = artifacts.some((artifact) => artifact.tool === "Projects");
+  const hasCrm = artifacts.some((artifact) => artifact.tool === "CRM");
+  const hasCalendar = artifacts.some((artifact) => artifact.tool === "Calendar");
+  const hasEmail = artifacts.some((artifact) => artifact.tool === "Email");
+  const tasks = [
+    { title: "Create and verify CRM account", owner: "Client Operations", due: "Completed", status: hasCrm ? "complete" : "draft", detail: `${company} · ${contact}` },
+    { title: "Assign the internal project owner", owner: "Operations lead", due: "Before activation", status: owner ? "complete" : "blocked", detail: owner || "Owner is still unassigned" },
+    { title: "Confirm billing and legal details", owner: "Client contact", due: "Day 0", status: billing ? "complete" : "blocked", detail: billing || "Billing contact, legal entity, and invoice address needed" },
+    { title: "Prepare delivery workspace", owner: owner || "Unassigned", due: "Day 0", status: hasWorkspace ? "complete" : "draft", detail: `${project} workspace and access groups` },
+    { title: "Collect team roster and access roles", owner: "Client contact", due: "Day 1", status: seats ? "review" : "blocked", detail: seats ? `${seats} seats known; individual names and roles still need review` : "Roster and seat count needed" },
+    { title: "Confirm kickoff date and timezone", owner: "Project owner", due: kickoff || "Unscheduled", status: kickoff && timezone ? "review" : "blocked", detail: kickoff ? `${kickoff} · timezone still needs confirmation` : "Date and timezone needed before sending" },
+    { title: "Review milestone dates and dependencies", owner: "Project owner", due: "Day 1", status: delivery ? "review" : "blocked", detail: delivery ? `Plan against ${delivery}` : "Delivery target is missing" },
+    { title: "Send welcome pack and kickoff choices", owner: "Client Operations", due: "After confirmations", status: hasEmail ? "review" : "draft", detail: "Draft is prepared but nothing was sent" },
+  ];
+
+  const kickoffLabel = kickoff || "Date awaiting confirmation";
+  const emailRecipient = scenario.email && scenario.email !== "No contact supplied" ? scenario.email : contact;
+  return <div className="generated-workspace">
+    <header className="workspace-result-head">
+      <div><p className="kicker">Generated client workspace</p><h3>{company}</h3><p>{project}</p></div>
+      <div className="workspace-result-status"><span>Sandbox workspace ready</span><strong>{artifacts.length} records created</strong><small>{gaps.length} production-readiness gap{gaps.length === 1 ? "" : "s"} highlighted</small></div>
+    </header>
+
+    <section className="workspace-section" aria-labelledby="crm-heading">
+      <div className="workspace-section-head"><div><span>CRM</span><h4 id="crm-heading">Client profile</h4></div><p>{hasCrm ? "Created in sandbox" : "Prepared as draft"}</p></div>
+      <div className="crm-field-grid">{profile.map((field) => <div className={field.status} key={field.label}><span>{field.label}<em>{field.status === "confirmed" ? "Confirmed" : field.status === "unassigned" ? "Unassigned" : "Needs input"}</em></span><strong>{field.value}</strong><small>{field.note} · {field.source}</small></div>)}</div>
+    </section>
+
+    <section className="workspace-section gap-section" aria-labelledby="gaps-heading">
+      <div className="workspace-section-head"><div><span>Readiness</span><h4 id="gaps-heading">Missing and incomplete information</h4></div><p>{gaps.length ? `${gaps.length} items need attention` : "No gaps detected"}</p></div>
+      {gaps.length ? <div className="gap-register">{gaps.map((gap, index) => <article className={gap.severity} key={`${gap.label}-${index}`}><div className="gap-title"><span>!</span><div><strong>{gap.label}</strong><em>{gap.severity === "required" ? "Required before live handoff" : "Recommended follow-up"}</em></div></div><p>{gap.detail}</p><dl><div><dt>Next action</dt><dd>{gap.action}</dd></div><div><dt>Owner</dt><dd>{gap.owner}</dd></div><div><dt>Impact</dt><dd>{gap.impact}</dd></div></dl></article>)}</div> : <div className="all-clear"><span>✓</span><p><strong>All operational fields are complete</strong>No follow-up information is required for a live handoff.</p></div>}
+    </section>
+
+    <section className="workspace-section" aria-labelledby="tasks-heading">
+      <div className="workspace-section-head"><div><span>Projects</span><h4 id="tasks-heading">Onboarding task board</h4></div><p>{tasks.filter((task) => task.status === "blocked").length} blocked · {tasks.filter((task) => task.status === "complete").length} completed</p></div>
+      <div className="task-table" role="table" aria-label="Generated onboarding tasks"><div className="task-table-head" role="row"><span>Task</span><span>Owner</span><span>Due</span><span>Status</span></div>{tasks.map((task) => <div className={`task-table-row ${task.status}`} role="row" key={task.title}><div><strong>{task.title}</strong><small>{task.detail}</small></div><span>{task.owner}</span><span>{task.due}</span><em>{task.status === "complete" ? "Completed" : task.status === "blocked" ? "Needs input" : task.status === "review" ? "Review" : "Draft"}</em></div>)}</div>
+    </section>
+
+    <div className="workspace-split">
+      <section className="workspace-section" aria-labelledby="kickoff-heading">
+        <div className="workspace-section-head"><div><span>Calendar</span><h4 id="kickoff-heading">Kickoff options</h4></div><p>{hasCalendar ? "Drafted · not sent" : "Not generated"}</p></div>
+        <div className="schedule-context"><div><span>Target date</span><strong>{kickoffLabel}</strong></div><div className={!timezone ? "missing" : ""}><span>Timezone</span><strong>{timezone || "Needs confirmation"}</strong></div></div>
+        <div className="kickoff-options">{["09:00–09:45", "11:30–12:15", "14:00–14:45"].map((time, index) => <div key={time}><span>{String.fromCharCode(65 + index)}</span><p><strong>{kickoffLabel}</strong>{time} client local time</p><em>Draft</em></div>)}</div>
+        <p className="workspace-warning">Nothing was invited or reserved. Confirm the date, client timezone, participants, and internal owner before sending.</p>
+      </section>
+
+      <section className="workspace-section" aria-labelledby="email-heading">
+        <div className="workspace-section-head"><div><span>Email</span><h4 id="email-heading">Welcome email</h4></div><p>{hasEmail ? "Drafted · not sent" : "Not generated"}</p></div>
+        <article className="email-preview"><div><span>To</span><strong>{emailRecipient}</strong></div><div><span>Subject</span><strong>Welcome to {project}</strong></div><p>Hi {scenario.id === "custom" ? `${company} team` : scenario.contact.split(" ")[0]},</p><p>Your {project} workspace has been prepared for review. Before activation, we still need {gaps.length ? gaps.slice(0, 3).map((gap) => gap.label.toLowerCase()).join(", ") : "no additional setup information"}.</p><p>Once confirmed, we will finalize the owner, task dates, team access, and kickoff invitation.</p><p>Best,<br />Client Operations</p></article>
+      </section>
+    </div>
+
+    <section className="workspace-section" aria-labelledby="policy-history-heading">
+      <div className="workspace-section-head"><div><span>Controls</span><h4 id="policy-history-heading">Decision and policy history</h4></div><p>Human-approved simulation</p></div>
+      <div className="decision-history">{analysis.policies.map((policy) => <div className={policy.status} key={policy.label}><span>{policy.status === "pass" ? "✓" : "!"}</span><p><strong>{policy.label}</strong>{policy.detail}</p><em>{policy.status}</em></div>)}<div className="approved"><span>✓</span><p><strong>Human approval recorded</strong>The reviewer unlocked only the displayed sandbox actions.</p><em>approved</em></div></div>
+    </section>
+
+    <section className="workspace-section evidence-section" aria-labelledby="records-heading">
+      <div className="workspace-section-head"><div><span>Evidence</span><h4 id="records-heading">Created sandbox records</h4></div><p>Technical verification</p></div>
+      <div className="artifact-grid">{artifacts.map((artifact) => <div key={artifact.externalId}><span>{artifact.tool}</span><strong>{artifact.title}</strong><code>{artifact.externalId}</code></div>)}</div>
+      <p className="sandbox-footnote">These records prove that each approved simulation step completed. They are synthetic and did not touch a real CRM, inbox, calendar, or project system.</p>
+    </section>
+  </div>;
 }
 
 function PolicyGrid({ policies }: { policies: PolicyCheck[] }) {
