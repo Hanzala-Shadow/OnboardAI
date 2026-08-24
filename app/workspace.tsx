@@ -267,7 +267,7 @@ export function OnboardWorkspace() {
         <div><span>Verify</span><p>Every step leaves audit evidence.</p></div>
       </section>
 
-      {showAudit && <AuditDrawer events={auditEvents} artifacts={artifacts} runId={runId} onClose={() => setShowAudit(false)} />}
+      {showAudit && <AuditDrawer scenario={active} analysis={analysis} events={auditEvents} artifacts={artifacts} runId={runId} onClose={() => setShowAudit(false)} />}
     </main>
   );
 }
@@ -343,7 +343,7 @@ function GeneratedClientWorkspace({ scenario, analysis, artifacts }: { scenario:
   const contact = matchedField(analysis, ["Primary contact", "Contact"])?.value || scenario.contact;
   const project = matchedField(analysis, ["Project", "Request", "Scope signal"])?.value || scenario.subject;
   const kickoff = matchedField(analysis, ["Kickoff", "Timing signal", "Requested start"])?.value;
-  const delivery = matchedField(analysis, ["Delivery window", "New deadline", "Deadline"])?.value;
+  const delivery = matchedField(analysis, ["Delivery window", "Delivery target", "New deadline", "Deadline"])?.value;
   const approver = matchedField(analysis, ["Approver"])?.value;
   const seats = matchedField(analysis, ["Team seats"])?.value;
   const budget = matchedField(analysis, ["Budget", "Budget signal"])?.value;
@@ -479,22 +479,74 @@ function explainAuditEvent(event: AuditEvent) {
   return { phase: "Recorded step", title: event.title, explanation: event.detail || "This step was recorded for traceability." };
 }
 
-function AuditDrawer({ events, artifacts, runId, onClose }: { events: AuditEvent[]; artifacts: Artifact[]; runId: string | null; onClose: () => void }) {
+function readableList(items: string[]) {
+  if (items.length === 0) return "none";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+}
+
+function deliverableName(artifact: Artifact) {
+  const key = `${artifact.actionId} ${artifact.tool} ${artifact.title}`.toLowerCase();
+  if (key.includes("crm")) return "a structured CRM client profile";
+  if (key.includes("task")) return "an onboarding task plan";
+  if (key.includes("workspace") || key.includes("project")) return "a delivery workspace";
+  if (key.includes("calendar") || key.includes("kickoff")) return "draft kickoff options";
+  if (key.includes("email") || key.includes("welcome") || key.includes("reply")) return "a client-ready email draft";
+  if (key.includes("invite") || key.includes("identity")) return "a reviewed team-access plan";
+  if (key.includes("timeline") || key.includes("planner")) return "a revised delivery plan";
+  return artifact.title.toLowerCase();
+}
+
+function proofContext(scenario: Scenario, analysis: Analysis | null, artifacts: Artifact[]) {
+  const company = analysis ? matchedField(analysis, ["Company", "Client"])?.value || scenario.company : scenario.company;
+  const project = analysis ? matchedField(analysis, ["Project", "Request", "Scope signal"])?.value || scenario.subject : scenario.subject;
+  const fieldValue = (labels: string[]) => analysis ? matchedField(analysis, labels)?.value : undefined;
+  const billingPolicy = analysis?.policies.find((policy) => policy.label === "Billing readiness");
+  const baseGaps = [
+    !fieldValue(["Approver"]) && "named approver",
+    !fieldValue(["Kickoff", "Timing signal", "Requested start"]) && "kickoff date",
+    !fieldValue(["Delivery window", "Delivery target", "New deadline", "Deadline"]) && "delivery target",
+    !fieldValue(["Team seats"]) && "team capacity",
+    !fieldValue(["Budget", "Budget signal"]) && "budget",
+    billingPolicy?.status !== "pass" && !fieldValue(["Billing contact"]) && "billing contact",
+    !fieldValue(["Client timezone", "Timezone"]) && "client timezone",
+    !fieldValue(["Project owner", "Internal owner"]) && "internal project owner",
+  ].filter((item): item is string => Boolean(item));
+  for (const policy of analysis?.policies.filter((item) => item.status !== "pass") ?? []) {
+    const label = policy.label.toLowerCase();
+    if (!baseGaps.some((gap) => gap.includes(label.split(" ")[0]))) baseGaps.push(label);
+  }
+  const gaps = [...new Set(baseGaps)];
+  const deliverables = [...new Set(artifacts.map(deliverableName))];
+  return { company, project, gaps, deliverables };
+}
+
+function AuditDrawer({ scenario, analysis, events, artifacts, runId, onClose }: { scenario: Scenario; analysis: Analysis | null; events: AuditEvent[]; artifacts: Artifact[]; runId: string | null; onClose: () => void }) {
   const [copiedSummary, setCopiedSummary] = useState(false);
   const retries = events.filter((event) => event.kind === "tool_retry").length;
   const approved = events.some((event) => event.kind === "approval" && !event.title.toLowerCase().includes("rejected"));
   const completed = events.some((event) => event.kind === "outcome");
   const story = events.map((event) => ({ event, ...explainAuditEvent(event) }));
+  const context = proofContext(scenario, analysis, artifacts);
 
   async function copyProofSummary() {
     const summary = [
-      "OnboardAI execution proof",
-      `Outcome: ${completed ? "Approved sandbox workflow completed" : "Run recorded"}`,
-      `Human approval: ${approved ? "Recorded" : "Not recorded"}`,
-      `Sandbox records: ${artifacts.length}`,
-      `Safe retries: ${retries}`,
-      "External systems touched: 0",
-      "Original custom request stored: No",
+      `OnboardAI execution proof — ${context.company}`,
+      `Project: ${context.project}`,
+      "",
+      "Business outcome",
+      `OnboardAI converted ${context.company}'s onboarding request into ${readableList(context.deliverables)}.`,
+      "",
+      "Readiness follow-up",
+      context.gaps.length ? `${context.gaps.length} production-readiness gap${context.gaps.length === 1 ? " remains" : "s remain"}: ${readableList(context.gaps)}. These were preserved in the generated workspace with an owner, impact, and next action.` : "No production-readiness gaps remained after review.",
+      "",
+      "Human control and safety",
+      `A reviewer ${approved ? "approved" : "did not approve"} ${artifacts.length} sandbox action${artifacts.length === 1 ? "" : "s"} before execution. ${artifacts.length} traceable record${artifacts.length === 1 ? " was" : "s were"} created${retries ? ` with ${retries} safe retr${retries === 1 ? "y" : "ies"}` : " without requiring a retry"}. No external systems were touched, and the original custom request was not stored.`,
+      "",
+      "Verification",
+      completed ? "Approved sandbox workflow completed successfully." : "The run was recorded but did not reach a completed outcome.",
+      `Run reference: ${runId ?? "Unavailable"}`,
     ].join("\n");
     await navigator.clipboard.writeText(summary);
     setCopiedSummary(true);
@@ -514,7 +566,7 @@ function AuditDrawer({ events, artifacts, runId, onClose }: { events: AuditEvent
 
     <section className="audit-records"><div className="audit-section-heading"><span>03</span><div><p className="kicker">Supporting records</p><h3>Evidence created by the run</h3></div></div><div className="audit-record-list">{artifacts.map((artifact) => <div key={artifact.externalId}><span>{artifact.tool}</span><p><strong>{artifact.title}</strong>Completed in the sandbox</p><code>{artifact.externalId}</code></div>)}</div></section>
 
-    <section className="audit-share"><div><strong>Share the result without the technical noise</strong><p>Copy a concise proof summary for a recruiter, manager, or project handoff.</p></div><button onClick={copyProofSummary} type="button">{copiedSummary ? "Summary copied ✓" : "Copy proof summary"}</button></section>
+    <section className="audit-share"><div><strong>Share the business outcome</strong><p>Includes {context.company}, the project, generated deliverables, {context.gaps.length} readiness gap{context.gaps.length === 1 ? "" : "s"}, human approval, and the safety result.</p></div><button onClick={copyProofSummary} type="button">{copiedSummary ? "Business proof copied ✓" : "Copy business proof"}</button></section>
 
     <details className="technical-details"><summary>View technical run details</summary><div><span>Run reference</span><code>{runId ?? "Unavailable"}</code><span>Audit events</span><strong>{events.length}</strong><span>Original custom request stored</span><strong>No</strong></div></details>
   </aside></div>;

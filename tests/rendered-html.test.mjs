@@ -52,7 +52,11 @@ test("explains audit evidence for nontechnical reviewers", async () => {
   assert.match(workspace, /What happened and why/);
   assert.match(workspace, /What this proves/);
   assert.match(workspace, /The agent could not act alone/);
-  assert.match(workspace, /Copy proof summary/);
+  assert.match(workspace, /Copy business proof/);
+  assert.match(workspace, /Business outcome/);
+  assert.match(workspace, /Readiness follow-up/);
+  assert.match(workspace, /Human control and safety/);
+  assert.match(workspace, /Run reference/);
   assert.match(workspace, /View technical run details/);
 });
 
