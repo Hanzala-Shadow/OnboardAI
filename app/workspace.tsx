@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { scenarios, type PolicyCheck, type WorkflowAction } from "../lib/scenarios";
+import { scenarios, type PolicyCheck, type Scenario, type WorkflowAction } from "../lib/scenarios";
 
 type Phase = "idle" | "analyzing" | "review" | "clarification" | "executing" | "complete" | "rejected" | "error";
 type ActionState = "queued" | "running" | "retrying" | "complete" | "failed";
@@ -16,6 +16,7 @@ type Analysis = {
 };
 type Artifact = { actionId: string; tool: string; externalId: string; title: string };
 type AuditEvent = { id: number; kind: string; title: string; detail: string; status: string; createdAt: string };
+type CustomDraft = { company: string; contactEmail: string; subject: string; body: string };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const demoMeta = {
@@ -34,8 +35,8 @@ function journeyIndex(phase: Phase) {
   return 4;
 }
 
-function guideFor(phase: Phase, company: string) {
-  if (phase === "idle") return { label: "Start here", title: `Analyze ${company}'s sample request`, body: "The agent will extract facts and prepare a plan. You will review everything before any simulated action can run." };
+function guideFor(phase: Phase, company: string, custom: boolean) {
+  if (phase === "idle") return { label: custom ? "Your request" : "Start here", title: custom ? "Paste a client request and test the agent" : `Analyze ${company}'s sample request`, body: custom ? "Use fictional or redacted information. The agent will interpret the text, apply policy, and show you what can safely happen next." : "The agent will extract facts and prepare a plan. You will review everything before any simulated action can run." };
   if (phase === "analyzing") return { label: "Agent working", title: "Turning the email into a reviewable plan", body: "The request is being interpreted, then checked against deterministic onboarding rules." };
   if (phase === "review") return { label: "Your decision", title: "Review what the simulation is allowed to do", body: "Check the extracted facts, warnings, and proposed actions. Approve only when the plan matches the request." };
   if (phase === "clarification") return { label: "Safe stop", title: "The agent found required information missing", body: "No tools are available. Copy the prepared clarification to see how the workflow recovers safely." };
@@ -58,11 +59,31 @@ export function OnboardWorkspace() {
   const [showAudit, setShowAudit] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [customDraft, setCustomDraft] = useState<CustomDraft>({ company: "", contactEmail: "", subject: "", body: "" });
 
-  const active = useMemo(() => scenarios.find((item) => item.id === selected) ?? scenarios[0], [selected]);
+  const active = useMemo<Scenario>(() => selected === "custom" ? {
+    id: "custom",
+    company: customDraft.company || "Your client",
+    contact: customDraft.contactEmail || "Custom request",
+    email: customDraft.contactEmail || "No contact supplied",
+    subject: customDraft.subject || "Your custom onboarding request",
+    received: "Now",
+    tone: "Custom",
+    avatar: "+",
+    body: [customDraft.body || "Paste a fictional or redacted client request below."],
+    attachments: [],
+    confidence: 0,
+    canExecute: false,
+    fields: [],
+    missing: [],
+    policies: [],
+    actions: [],
+  } : scenarios.find((item) => item.id === selected) ?? scenarios[0], [selected, customDraft]);
+  const isCustom = selected === "custom";
+  const customCanAnalyze = customDraft.body.trim().length >= 40;
   const completeActions = Object.values(actionStates).filter((state) => state === "complete").length;
   const currentStep = journeyIndex(phase);
-  const guide = guideFor(phase, active.company);
+  const guide = guideFor(phase, active.company, isCustom);
 
   function reset(nextScenario = selected) {
     setSelected(nextScenario);
@@ -75,6 +96,7 @@ export function OnboardWorkspace() {
     setAuditEvents([]);
     setError("");
     setCopied(false);
+    setEngine(nextScenario === "custom" ? "custom_rules" : "verified_demo");
   }
 
   async function runOnboarding() {
@@ -86,7 +108,7 @@ export function OnboardWorkspace() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenarioId: active.id }),
+        body: JSON.stringify({ scenarioId: active.id, ...(isCustom ? { customRequest: customDraft } : {}) }),
       });
       const payload = await response.json() as { runId?: string; engine?: string; analysis?: Analysis; error?: string };
       if (!response.ok || !payload.runId || !payload.analysis) throw new Error(payload.error || "The request could not be analyzed");
@@ -183,9 +205,9 @@ export function OnboardWorkspace() {
       </ol>
 
       <section className="demo-layout">
-        <aside className="scenario-panel" aria-label="Choose a sample request">
-          <div className="panel-heading"><div><p className="kicker">Choose a sample</p><h2>Three ways to test</h2></div><span>01</span></div>
-          <p className="panel-intro">Each request proves a different agent behavior. Start with the recommended happy path.</p>
+        <aside className="scenario-panel" aria-label="Choose a request">
+          <div className="panel-heading"><div><p className="kicker">Choose a request</p><h2>Four ways to test</h2></div><span>01</span></div>
+          <p className="panel-intro">Start with a proof scenario, then give the agent your own fictional or redacted request.</p>
           <div className="scenario-list">
             {scenarios.map((item) => {
               const meta = demoMeta[item.id as keyof typeof demoMeta];
@@ -194,6 +216,10 @@ export function OnboardWorkspace() {
                 <span className="scenario-outcome"><b>{meta.label}</b>{meta.detail}</span>
               </button>;
             })}
+            <button className={`scenario custom-scenario ${isCustom ? "active" : ""}`} onClick={() => reset("custom")} type="button" aria-pressed={isCustom}>
+              <span className="scenario-top"><span className="avatar custom-avatar" aria-hidden="true">+</span><span className="scenario-name"><strong>Try your own request</strong><small>Paste client onboarding text</small></span><em>Interactive</em></span>
+              <span className="scenario-outcome"><b>Custom test</b>See what the agent extracts, blocks, and proposes.</span>
+            </button>
           </div>
           <div className="demo-boundary"><span>Simulation boundary</span><p>AI interprets the request. Code enforces policy. Only your approval unlocks sandbox actions.</p></div>
         </aside>
@@ -207,15 +233,15 @@ export function OnboardWorkspace() {
           <div className="stage-grid">
             <section className="request-panel">
               <div className="request-toolbar">
-                <div><p className="kicker">{activeTab === "source" ? "Sample client request" : "Review proposed plan"}</p><h2>{active.subject}</h2></div>
+                <div><p className="kicker">{activeTab === "source" ? isCustom ? "Your client request" : "Sample client request" : "Review proposed plan"}</p><h2>{active.subject}</h2></div>
                 {phase !== "idle" && <div className="view-tabs" role="tablist" aria-label="Request views"><button id="source-tab" aria-controls="source-panel" aria-selected={activeTab === "source"} className={activeTab === "source" ? "active" : ""} onClick={() => setActiveTab("source")} role="tab" type="button">Source</button><button id="review-tab" aria-controls="review-panel" aria-selected={activeTab === "review"} className={activeTab === "review" ? "active" : ""} onClick={() => setActiveTab("review")} role="tab" type="button">Agent review</button></div>}
               </div>
 
               <div id={activeTab === "source" ? "source-panel" : "review-panel"} role="tabpanel" aria-labelledby={activeTab === "source" ? "source-tab" : "review-tab"}>
-                {activeTab === "source" ? <SourceRequest scenario={active} /> : <AgentWorkspace phase={phase} analysis={analysis} actionStates={actionStates} artifacts={artifacts} error={error} engine={engine} onCopy={copyClarification} copied={copied} />}
+                {activeTab === "source" ? isCustom ? <CustomRequestForm value={customDraft} onChange={setCustomDraft} locked={phase !== "idle"} /> : <SourceRequest scenario={active} /> : <AgentWorkspace phase={phase} analysis={analysis} actionStates={actionStates} artifacts={artifacts} error={error} engine={engine} onCopy={copyClarification} copied={copied} />}
               </div>
 
-              <DecisionDock phase={phase} actionCount={analysis?.actions.length ?? 0} copied={copied} onAnalyze={runOnboarding} onApprove={approvePlan} onReject={rejectPlan} onCopy={copyClarification} onReplay={() => reset()} onAudit={() => setShowAudit(true)} onNext={() => reset(phase === "complete" ? "copper" : "northstar")} />
+              <DecisionDock phase={phase} actionCount={analysis?.actions.length ?? 0} copied={copied} custom={isCustom} analyzeDisabled={isCustom && !customCanAnalyze} onAnalyze={runOnboarding} onApprove={approvePlan} onReject={rejectPlan} onCopy={copyClarification} onReplay={() => reset()} onAudit={() => setShowAudit(true)} onNext={() => reset(phase === "complete" ? "copper" : "northstar")} />
             </section>
 
             <ControlPanel phase={phase} analysis={analysis} actionStates={actionStates} completeActions={completeActions} artifacts={artifacts} engine={engine} />
@@ -235,14 +261,31 @@ export function OnboardWorkspace() {
   );
 }
 
-function DecisionDock({ phase, actionCount, copied, onAnalyze, onApprove, onReject, onCopy, onReplay, onAudit, onNext }: { phase: Phase; actionCount: number; copied: boolean; onAnalyze: () => void; onApprove: () => void; onReject: () => void; onCopy: () => void; onReplay: () => void; onAudit: () => void; onNext: () => void }) {
-  if (phase === "idle") return <div className="decision-dock"><div><span>Next step</span><strong>Let the agent interpret this sample</strong><small>You will review the result before anything runs.</small></div><button className="primary-action" onClick={onAnalyze} type="button">Analyze this request <span>→</span></button></div>;
+function DecisionDock({ phase, actionCount, copied, custom, analyzeDisabled, onAnalyze, onApprove, onReject, onCopy, onReplay, onAudit, onNext }: { phase: Phase; actionCount: number; copied: boolean; custom: boolean; analyzeDisabled: boolean; onAnalyze: () => void; onApprove: () => void; onReject: () => void; onCopy: () => void; onReplay: () => void; onAudit: () => void; onNext: () => void }) {
+  if (phase === "idle") return <div className="decision-dock"><div><span>Next step</span><strong>{custom ? "Let the agent interpret your request" : "Let the agent interpret this sample"}</strong><small>{analyzeDisabled ? "Add at least 40 characters of request detail." : "You will review the result before anything runs."}</small></div><button className="primary-action" onClick={onAnalyze} disabled={analyzeDisabled} type="button">Analyze this request <span>→</span></button></div>;
   if (phase === "analyzing") return <div className="decision-dock working" aria-live="polite"><div><span>In progress</span><strong>Reading source → extracting facts → checking rules</strong><small>No actions are unlocked during analysis.</small></div><div className="working-dots" aria-hidden="true"><i /><i /><i /></div></div>;
   if (phase === "review") return <div className="decision-dock review-dock"><div><span>Human approval required</span><strong>Approve {actionCount} sandbox actions</strong><small>Nothing has run yet. Rejecting keeps every tool locked.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onReject} type="button">Reject safely</button><button className="primary-action" onClick={onApprove} type="button">Approve this simulation <span>→</span></button></div></div>;
   if (phase === "clarification") return <div className="decision-dock blocked-dock"><div><span>Agent stopped safely</span><strong>Send the prepared questions before onboarding</strong><small>Tool execution is unavailable until required information exists.</small></div><button className="primary-action" onClick={onCopy} type="button">{copied ? "Clarification copied ✓" : "Copy clarification"}</button></div>;
   if (phase === "executing") return <div className="decision-dock working" aria-live="polite"><div><span>Approved simulation</span><strong>Running one action at a time</strong><small>Provider retries and completed steps remain visible.</small></div><div className="working-dots" aria-hidden="true"><i /><i /><i /></div></div>;
   if (phase === "complete") return <div className="decision-dock complete-dock"><div><span>Run complete</span><strong>Evidence is ready for inspection</strong><small>Next, try a warning case to see human judgment and retry behavior.</small></div><div className="dock-actions"><button className="secondary-action" onClick={onNext} type="button">Try warning case</button><button className="primary-action" onClick={onAudit} type="button">Open audit trail <span>→</span></button></div></div>;
   return <div className="decision-dock"><div><span>{phase === "rejected" ? "Nothing was simulated" : "Simulation paused"}</span><strong>{phase === "rejected" ? "Choose another sample when ready" : "Prior progress is preserved above"}</strong><small>Replay starts a fresh, isolated sandbox run.</small></div><button className="primary-action" onClick={onReplay} type="button">Replay this sample <span>→</span></button></div>;
+}
+
+function CustomRequestForm({ value, onChange, locked }: { value: CustomDraft; onChange: (value: CustomDraft) => void; locked: boolean }) {
+  function update(field: keyof CustomDraft, next: string) {
+    onChange({ ...value, [field]: next });
+  }
+
+  return <form className="custom-form" aria-label="Custom client request" onSubmit={(event) => event.preventDefault()}>
+    <div className="custom-privacy"><span aria-hidden="true">◇</span><p><strong>Use fictional or redacted information</strong>The original text is processed for this run but is not written to the audit database. Do not paste passwords, access keys, or confidential client data.</p></div>
+    <div className="custom-fields">
+      <label><span>Client or company</span><input value={value.company} onChange={(event) => update("company", event.target.value)} disabled={locked} maxLength={120} placeholder="Example: Atlas Studio" autoComplete="organization" /></label>
+      <label><span>Contact email</span><input value={value.contactEmail} onChange={(event) => update("contactEmail", event.target.value)} disabled={locked} maxLength={160} placeholder="client@example.com" type="email" autoComplete="email" /></label>
+    </div>
+    <label><span>Request subject</span><input value={value.subject} onChange={(event) => update("subject", event.target.value)} disabled={locked} maxLength={160} placeholder="Example: Set up our product launch workspace" /></label>
+    <label><span>Paste the client request</span><textarea value={value.body} onChange={(event) => update("body", event.target.value)} disabled={locked} maxLength={5000} rows={11} aria-describedby="custom-request-help" placeholder="Include the goal, desired timing, requested setup, and a named approver. Example: We want to begin the website launch project on September 15. Please prepare a workspace and kickoff options. Jordan Lee is the approver..." /><small id="custom-request-help">{value.body.length}/5000 characters · 40 minimum to analyze</small></label>
+    {locked && <p className="custom-lock-note">This input is locked for the current run so the source and audit evidence stay consistent.</p>}
+  </form>;
 }
 
 function SourceRequest({ scenario }: { scenario: (typeof scenarios)[number] }) {
@@ -257,7 +300,7 @@ function AgentWorkspace({ phase, analysis, actionStates, artifacts, error, engin
   if (phase === "clarification") return <div className="review-stack"><div className="review-head blocked"><div><p className="kicker">Execution unavailable</p><h3>{analysis.missing.length} required details are missing</h3></div><span>SAFE STOP</span></div><div className="missing-grid">{analysis.missing.map((item) => <div key={item}><span>!</span><p><strong>{item}</strong>Required before any onboarding action</p></div>)}</div><div className="draft-card"><div><p className="kicker">Prepared recovery</p><button onClick={onCopy} type="button">{copied ? "Copied ✓" : "Copy"}</button></div><pre>{analysis.clarificationDraft}</pre></div><PolicyGrid policies={analysis.policies} /></div>;
   if (phase === "complete") return <div className="outcome-state success-state"><span>✓</span><p className="kicker">Approved simulation complete</p><h3>Every action produced evidence</h3><p>The sandbox created traceable records without touching a real client system.</p><div className="artifact-grid">{artifacts.map((artifact) => <div key={artifact.externalId}><span>{artifact.tool}</span><strong>{artifact.title}</strong><code>{artifact.externalId}</code></div>)}</div></div>;
 
-  return <div className="review-stack">{phase === "error" && <div className="inline-error"><strong>Simulation paused</strong><span>{error}</span><small>Completed evidence and the original plan remain visible.</small></div>}<div className="review-head"><div><p className="kicker">AI interpretation for review</p><h3>{analysis.fields.length} extracted facts</h3></div><span>{analysis.confidence}% confidence</span></div><div className="field-grid">{analysis.fields.map((field) => <div key={field.label}><span>{field.label}</span><strong>{field.value}</strong><small>Source: {field.source}</small></div>)}</div><PolicyGrid policies={analysis.policies} /><div className="action-plan"><div className="section-label"><span>Actions awaiting approval</span><strong>{analysis.actions.length}</strong></div>{analysis.actions.map((action) => { const state = actionStates[action.id] ?? "queued"; return <div className={`action-row ${state}`} key={action.id}><span className="action-state">{state === "complete" ? "✓" : state === "running" ? "↻" : state === "retrying" ? "↺" : state === "failed" ? "!" : "→"}</span><div><strong>{action.title}</strong><small>{action.detail}</small></div><em>{state === "queued" ? "Locked" : state === "retrying" ? "Safe retry" : state}</em></div>; })}</div><p className="model-note">{engine === "gemini_live" ? "AI extraction: Gemini · Policy and execution: deterministic code" : "AI extraction: verified demo dataset · Policy and execution: deterministic code"}</p></div>;
+  return <div className="review-stack">{phase === "error" && <div className="inline-error"><strong>Simulation paused</strong><span>{error}</span><small>Completed evidence and the original plan remain visible.</small></div>}<div className="review-head"><div><p className="kicker">AI interpretation for review</p><h3>{analysis.fields.length} extracted facts</h3></div><span>{analysis.confidence}% confidence</span></div><div className="field-grid">{analysis.fields.map((field) => <div key={field.label}><span>{field.label}</span><strong>{field.value}</strong><small>Source: {field.source}</small></div>)}</div><PolicyGrid policies={analysis.policies} /><div className="action-plan"><div className="section-label"><span>Actions awaiting approval</span><strong>{analysis.actions.length}</strong></div>{analysis.actions.map((action) => { const state = actionStates[action.id] ?? "queued"; return <div className={`action-row ${state}`} key={action.id}><span className="action-state">{state === "complete" ? "✓" : state === "running" ? "↻" : state === "retrying" ? "↺" : state === "failed" ? "!" : "→"}</span><div><strong>{action.title}</strong><small>{action.detail}</small></div><em>{state === "queued" ? "Locked" : state === "retrying" ? "Safe retry" : state}</em></div>; })}</div><p className="model-note">{engine === "gemini_live" ? "AI extraction: Gemini · Policy and execution: deterministic code" : engine === "custom_rules" ? "Custom extraction: local structured parser · Policy and execution: deterministic code" : "AI extraction: verified demo dataset · Policy and execution: deterministic code"}</p></div>;
 }
 
 function PolicyGrid({ policies }: { policies: PolicyCheck[] }) {
@@ -273,7 +316,7 @@ function ControlPanel({ phase, analysis, actionStates, completeActions, artifact
     { title: "Evidence", detail: artifacts.length ? `${artifacts.length} records available` : "Available after execution", done: phase === "complete" },
   ];
   const workingAction = analysis?.actions.find((action) => ["running", "retrying"].includes(actionStates[action.id]));
-  return <aside className="control-panel" aria-label="Agent control and evidence"><div className="panel-heading"><div><p className="kicker">Control & evidence</p><h2>What remains locked</h2></div><span>02</span></div><div className="lock-card"><span aria-hidden="true">◆</span><p><strong>{phase === "executing" ? "Only approved actions are running" : phase === "complete" ? "The run is complete" : "All sandbox tools are locked"}</strong>{phase === "executing" ? workingAction?.title ?? "Preparing the next action" : phase === "complete" ? "Open the audit trail to inspect every step." : "Model output cannot call tools directly."}</p></div><ol className="control-steps">{steps.map((step, index) => <li className={step.done ? "done" : index === journeyIndex(phase) ? "active" : ""} key={step.title}><span>{step.done ? "✓" : index + 1}</span><p><strong>{step.title}</strong>{step.detail}</p></li>)}</ol><div className="evidence-card"><span>Evidence ledger</span><div><p>Completed actions<strong>{completeActions}</strong></p><p>Unsafe actions<strong>0</strong></p><p>External systems touched<strong>0</strong></p></div></div><p className="engine-note">Extraction source: {engine === "gemini_live" ? "Gemini live" : "verified demo data"}</p></aside>;
+  return <aside className="control-panel" aria-label="Agent control and evidence"><div className="panel-heading"><div><p className="kicker">Control & evidence</p><h2>What remains locked</h2></div><span>02</span></div><div className="lock-card"><span aria-hidden="true">◆</span><p><strong>{phase === "executing" ? "Only approved actions are running" : phase === "complete" ? "The run is complete" : "All sandbox tools are locked"}</strong>{phase === "executing" ? workingAction?.title ?? "Preparing the next action" : phase === "complete" ? "Open the audit trail to inspect every step." : "Model output cannot call tools directly."}</p></div><ol className="control-steps">{steps.map((step, index) => <li className={step.done ? "done" : index === journeyIndex(phase) ? "active" : ""} key={step.title}><span>{step.done ? "✓" : index + 1}</span><p><strong>{step.title}</strong>{step.detail}</p></li>)}</ol><div className="evidence-card"><span>Evidence ledger</span><div><p>Completed actions<strong>{completeActions}</strong></p><p>Unsafe actions<strong>0</strong></p><p>External systems touched<strong>0</strong></p></div></div><p className="engine-note">Extraction source: {engine === "gemini_live" ? "Gemini live" : engine === "custom_rules" ? "local structured parser" : "verified demo data"}</p></aside>;
 }
 
 function AuditDrawer({ events, artifacts, runId, onClose }: { events: AuditEvent[]; artifacts: Artifact[]; runId: string | null; onClose: () => void }) {

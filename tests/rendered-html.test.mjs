@@ -7,7 +7,7 @@ test("defines the OnboardAI workspace without starter metadata", async () => {
     readFile(new URL("../app/workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(workspace, /Three ways to test/);
+  assert.match(workspace, /Four ways to test/);
   assert.match(workspace, /Analyze this request/);
   assert.match(workspace, /Safe to explore/);
   assert.match(workspace, /aria-current/);
@@ -30,6 +30,23 @@ test("defines a guided agent supervision flow", async () => {
   assert.match(workspace, /Safe stop/);
   assert.match(workspace, /Approve this simulation/);
   assert.match(workspace, /Open audit trail/);
+});
+
+test("defines a custom request path with privacy and policy gates", async () => {
+  const [workspace, analyze, execute, custom] = await Promise.all([
+    readFile(new URL("../app/workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/execute/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/custom.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(workspace, /Try your own request/);
+  assert.match(workspace, /Use fictional or redacted information/);
+  assert.match(workspace, /not written to the audit database/);
+  assert.match(analyze, /sanitizeCustomRequest/);
+  assert.match(custom, /Named approver/);
+  assert.match(custom, /actions: canExecute \? customActions : \[\]/);
+  assert.match(execute, /run\.status !== "review"/);
+  assert.match(execute, /run\.status !== "executing"/);
 });
 
 test("produces the deployable worker and hosting manifest", async () => {
